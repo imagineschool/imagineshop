@@ -1,14 +1,30 @@
 import 'dotenv/config';
 import express from 'express';
 import jwt from 'jsonwebtoken';
+import multer from 'multer';
+import crypto from 'crypto';
+import { extname } from 'path';
 
 import { authMiddleware } from './middlewares/authMiddleware.js';
+import { ProductService } from './services/product-service.js';
 import { UserService } from './services/user-service.js';
 
 const app = express();
 const port = 3000;
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/');
+  },
+  filename: (req, file, cb) => {
+    const newFileName = crypto.randomBytes(32).toString('hex');
+    const fileExtension = extname(file.originalname);
+    cb(null, `${newFileName}${fileExtension}`);
+  }
+});
+const uploadMiddleware = multer({ storage });
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 app.get('/', async (req, res) => {
   res.send('IMAGINE SHOP');
@@ -20,12 +36,19 @@ app.post('/login', async (req, res) => {
   const userLogged = await userService.login(email, password);
   if (userLogged) {
     const secretKey = process.env.SECRET_KEY;
-    const token = jwt.sign({ user: userLogged }, secretKey, { expiresIn: "3600s" });
+    const token = jwt.sign({ user: userLogged }, secretKey, { expiresIn: "1d" });
     return res.status(200).json({ token });
   }
   return res.status(400).json({ message: 'E-mail ou senha inválidos.' });
 });
 
+app.get('/products', async (req, res) => {
+  const productService = new ProductService();
+  const products = await productService.findAll();
+  return res.status(200).json(products);
+});
+
+app.use('/uploads', express.static('uploads'));
 app.use(authMiddleware);
 
 app.post('/users', async (req, res) => {
@@ -75,6 +98,16 @@ app.put('/users/:id', async (req, res) => {
     return res.status(200).json({ message: 'Usuário atualizado com sucesso.' });
   }
   return res.status(404).json({ message: 'Usuário não encontrado.' });
+});
+
+app.post('/products', uploadMiddleware.single('image'), async (req, res) => {
+  const { name, description, price, summary, stock } = req.body;
+  const fileName = req.file.filename;
+  const product = { name, description, price, summary, stock, fileName };
+  const productService = new ProductService();
+  console.log(product);
+  await productService.create(product);
+  return res.status(201).json(product);
 });
 
 app.listen(process.env.PORT || port, () => {
